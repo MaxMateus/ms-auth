@@ -1,0 +1,44 @@
+version: "3.8"
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./:/var/www/html
+    depends_on:
+      - db
+    networks:
+      - msnet
+
+  web:
+    image: nginx:stable
+    ports:
+      - "80:80"
+    volumes:
+      - ./:/var/www/html
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - app
+    networks:
+      - msnet
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: ms_auth
+      MYSQL_USER: ms_auth
+      MYSQL_PASSWORD: ms_auth_pass
+    volumes:
+      - db_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    networks:
+      - msnet
+
+networks:
+  msnet:
+
+volumes:
+  db_data:
