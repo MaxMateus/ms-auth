@@ -7,23 +7,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use App\Http\Requests\RegisterRequest;
 
 class AuthController extends Controller
 {
-    // Registro
-    public function register(Request $request)
+    public function register(RegisterRequest $request)
     {
-        $data = $request->validate([
-            'name'     => 'required|string|max:255',
-            'email'    => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8',
-        ]);
-
-        $user = User::create([
-            'name'     => $data['name'],
-            'email'    => $data['email'],
-            'password' => Hash::make($data['password']),
-        ]);
+        $data = $request->validated();
+        $user = User::create($data);
 
         return response()->json([
             'message' => 'User registered successfully',
@@ -47,7 +38,6 @@ class AuthController extends Controller
         
         $user = Auth::user();
         $token = $user->createToken('authToken')->accessToken;
-        // dd('chegou aqui');
 
         return response()->json([
             'token' => $token,
