@@ -8,18 +8,57 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use App\Http\Requests\RegisterRequest;
+use App\Services\UserService;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
+    protected UserService $userService;
+
+    public function __construct(UserService $userService)
+    {
+        $this->userService = $userService;
+    }
+
     public function register(RegisterRequest $request)
     {
         $data = $request->validated();
-        $user = User::create($data);
+        // Verificar se usuário já existe
+        $existingUserCheck = $this->userService->checkUserExists($data['email'], $data['cpf']);
+        
+        if ($existingUserCheck['exists']) {
+            return response()->json([
+                'message' => 'Usuário já cadastrado no sistema.',
+                'errors' => $existingUserCheck['conflicts']
+            ], 400);
+        }
 
-        return response()->json([
-            'message' => 'User registered successfully',
-            'user'    => $user,
-        ], 201);
+        try {
+            $user = $this->userService->createUser($data);
+
+            return response()->json([
+                'message' => 'Usuário registrado com sucesso',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'cpf' => $user->cpf,
+                    'phone' => $user->phone,
+                    'created_at' => $user->created_at,
+                ],
+            ], 201);
+        } catch (\Exception $e) {
+            // Log do erro para debug
+            Log::error('Erro no registro de usuário: ' . $e->getMessage(), [
+                'email' => $data['email'] ?? 'N/A',
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'message' => 'Erro interno do servidor',
+                'debug' => config('app.debug') ? $e->getMessage() : 'Verifique os logs para mais detalhes'
+            ], 500);
+        }
     }
 
     // Login
@@ -36,6 +75,7 @@ class AuthController extends Controller
             ]);
         }
         
+        /** @var \App\Models\User $user */
         $user = Auth::user();
         $token = $user->createToken('authToken')->accessToken;
 
@@ -58,6 +98,7 @@ class AuthController extends Controller
     // Refresh Token (opcional)
     public function refresh(Request $request)
     {
+        /** @var \App\Models\User $user */
         $user = $request->user();
         $token = $user->createToken('authToken')->accessToken;
 

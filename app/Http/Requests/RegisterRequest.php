@@ -27,51 +27,50 @@ class RegisterRequest extends FormRequest
             'name' => ['required', 'string', 'min:3', 'max:255'],
             'email' => ['required', 'email', 'max:255'],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
-            'cpf' => ['required', 'digits:11'],
-            'phone' => ['required', 'regex:/^\d{10,11}$/'],
+            'cpf' => ['required', 'string', 'min:11', 'max:14'], // Permite CPF com ou sem formatação
+            'phone' => ['required', 'string', 'min:10', 'max:15'], // Permite telefone com formatação
             'birthdate' => ['required', 'date', 'before:-18 years'],
             'gender' => ['required', Rule::in(['M','F','Outro'])],
             'accept_terms' => ['required', 'accepted'],
             'street' => ['required', 'string', 'max:255'],
             'number' => ['required', 'string', 'max:10'],
-            'complement' => ['required', 'string', 'max:100'],
+            'complement' => ['nullable', 'string', 'max:100'], // Opcional
             'neighborhood' => ['required', 'string', 'max:100'],
             'city' => ['required', 'string', 'max:100'],
             'state' => ['required', 'string', 'size:2'],
-            'zip_code' => ['required', 'regex:/^\d{8}$/'],
+            'zip_code' => ['required', 'string', 'min:8', 'max:10'], // Permite CEP com ou sem formatação
         ];
     }
-    // protected function prepareForValidation(): void
-    // {
-    //     $this->merge([
-    //         'email' => strtolower(trim($this->email ?? '')),
-    //         'cpf' => preg_replace('/\D/', '', $this->cpf ?? ''),
-    //     ]);
-    // }
-    // public function withValidator($validator)
-    // {
-    //     $validator->after(function ($validator) {
-    //         $this->validateUniqueUser($validator);
-    //     });
-    // }
-    // protected function validateUniqueUser($validator)
-    // {
-    //     $email = $this->input('email');
-    //     $cpf = $this->input('cpf');
-        
-    //     $existingUser = User::where('email', $email)
-    //                     ->orWhere('cpf', $cpf)
-    //                     ->first(['email', 'cpf']);
-        
-    //     if ($existingUser) {
-    //         if ($existingUser->email === $email) {
-    //             $validator->errors()->add('email', 'Já existe um usuário cadastrado com este e-mail.');
-    //         }
-            
-    //         if ($existingUser->cpf === $cpf) {
-    //             $validator->errors()->add('cpf', 'Já existe um usuário cadastrado com este CPF.');
-    //         }
-    //     }
-    // }
+
+    /**
+     * Mensagens de erro customizadas
+     */
+    public function messages(): array
+    {
+        return [
+            'name.required' => 'O nome é obrigatório.',
+            'name.min' => 'O nome deve ter pelo menos 3 caracteres.',
+            'email.required' => 'O e-mail é obrigatório.',
+            'email.email' => 'O e-mail deve ter um formato válido.',
+            'password.required' => 'A senha é obrigatória.',
+            'password.min' => 'A senha deve ter pelo menos 8 caracteres.',
+            'password.confirmed' => 'A confirmação da senha não confere.',
+            'cpf.required' => 'O CPF é obrigatório.',
+            'phone.required' => 'O telefone é obrigatório.',
+            'birthdate.required' => 'A data de nascimento é obrigatória.',
+            'birthdate.before' => 'Você deve ser maior de 18 anos.',
+            'gender.required' => 'O gênero é obrigatório.',
+            'gender.in' => 'O gênero deve ser M, F ou Outro.',
+            'accept_terms.required' => 'Você deve aceitar os termos de uso.',
+            'accept_terms.accepted' => 'Você deve aceitar os termos de uso.',
+            'street.required' => 'A rua é obrigatória.',
+            'number.required' => 'O número é obrigatório.',
+            'neighborhood.required' => 'O bairro é obrigatório.',
+            'city.required' => 'A cidade é obrigatória.',
+            'state.required' => 'O estado é obrigatório.',
+            'state.size' => 'O estado deve ter 2 caracteres (ex: SP).',
+            'zip_code.required' => 'O CEP é obrigatório.',
+        ];
+    }
     
 }
