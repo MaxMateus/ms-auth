@@ -33,6 +33,12 @@ class AuthController extends Controller
             ], 400);
         }
 
+        if (!$this->userService->validateCpfFormat($data['cpf'])) {
+            return response()->json([
+                'message' => 'O CPF informado não é válido.',
+            ], 422);
+        }
+
         try {
             $user = $this->userService->createUser($data);
 
@@ -49,14 +55,10 @@ class AuthController extends Controller
             ], 201);
         } catch (\Exception $e) {
             // Log do erro para debug
-            Log::error('Erro no registro de usuário: ' . $e->getMessage(), [
-                'email' => $data['email'] ?? 'N/A',
-                'trace' => $e->getTraceAsString()
-            ]);
-            
+            Log::error('Erro no registro de usuário: ' . $e->getMessage());
+
             return response()->json([
-                'message' => 'Erro interno do servidor',
-                'debug' => config('app.debug') ? $e->getMessage() : 'Verifique os logs para mais detalhes'
+                'message' => 'Erro interno do servidor'
             ], 500);
         }
     }
