@@ -10,6 +10,8 @@ use Illuminate\Validation\ValidationException;
 use App\Http\Requests\RegisterRequest;
 use App\Services\UserService;
 use Illuminate\Support\Facades\Log;
+use Laravel\Passport\Token;
+use Illuminate\Support\Facades\DB;
 
 class AuthController extends Controller
 {
@@ -97,15 +99,86 @@ class AuthController extends Controller
         ]);
     }
 
-    // Refresh Token (opcional)
+    // Refresh Token
     public function refresh(Request $request)
     {
-        /** @var \App\Models\User $user */
-        $user = $request->user();
-        $token = $user->createToken('authToken')->accessToken;
+        try {
+            // Verifica se o header Authorization está presente
+            $authHeader = $request->header('Authorization');
+            if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
+                return response()->json([
+                    'message' => 'Token não fornecido.',
+                    'error' => 'token_missing'
+                ], 400);
+            }
 
-        return response()->json([
-            'token' => $token,
-        ]);
+            // Extrai o token JWT
+            $tokenValue = substr($authHeader, 7);
+            
+            // Decodifica o JWT para obter o jti (JWT ID)
+            try {
+                $tokenParts = explode('.', $tokenValue);
+                if (count($tokenParts) !== 3) {
+                    throw new \Exception('Token malformado');
+                }
+                
+                $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $tokenParts[1])), true);
+                if (!$payload || !isset($payload['jti'])) {
+                    throw new \Exception('Payload inválido');
+                }
+                
+                $jti = $payload['jti'];
+            } catch (\Exception $e) {
+                return response()->json([
+                    'message' => 'Token malformado.',
+                    'error' => 'malformed_token'
+                ], 400);
+            }
+            
+            // Busca o token no banco usando o JTI
+            $token = DB::table('oauth_access_tokens')
+                      ->where('id', $jti)
+                      ->where('revoked', false)
+                      ->where('expires_at', '>', now())
+                      ->first();
+            
+            if (!$token) {
+                return response()->json([
+                    'message' => 'Token inválido ou expirado.',
+                    'error' => 'invalid_token'
+                ], 400);
+            }
+
+            // Busca o usuário
+            $user = User::find($token->user_id);
+            if (!$user) {
+                return response()->json([
+                    'message' => 'Usuário não encontrado.',
+                    'error' => 'user_not_found'
+                ], 400);
+            }
+
+            // Revoga o token atual
+            DB::table('oauth_access_tokens')
+              ->where('id', $jti)
+              ->update(['revoked' => true]);
+            
+            // Cria um novo token
+            $newToken = $user->createToken('authToken')->accessToken;
+
+            return response()->json([
+                'token' => $newToken,
+                'message' => 'Token renovado com sucesso'
+            ]);
+            
+        } catch (\Exception $e) {
+            // Log do erro para debug
+            Log::error('Erro no refresh de token: ' . $e->getMessage());
+            
+            return response()->json([
+                'message' => 'Token inválido ou expirado.',
+                'error' => 'invalid_token'
+            ], 400);
+        }
     }
 }

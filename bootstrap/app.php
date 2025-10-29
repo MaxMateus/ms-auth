@@ -25,4 +25,25 @@ return Application::configure(basePath: dirname(__DIR__))
                 'errors'  => $e->errors(),
             ], 400);
         });
+        
+        // Handler para exceções de autenticação do Passport
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'message' => 'Token inválido ou expirado.',
+                    'error' => 'invalid_token'
+                ], 400);
+            }
+            
+            // Para outras rotas, retornar comportamento padrão
+            return redirect()->guest(route('login'));
+        });
+        
+        // Handler para exceções gerais do Laravel Passport
+        $exceptions->render(function (\Laravel\Passport\Exceptions\OAuthServerException $e, $request) {
+            return response()->json([
+                'message' => 'Token inválido ou expirado.',
+                'error' => 'invalid_token'
+            ], 400);
+        });
     })->create();
