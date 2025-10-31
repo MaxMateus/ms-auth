@@ -17,6 +17,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'validate.json' => \App\Http\Middleware\ValidateJsonContentType::class,
         ]);
+
+        $middleware->redirectTo(function ($request) {
+            return $request->is('api/*') ? null : '/';
+        });
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (ValidationException $e, $request) {

@@ -15,5 +15,13 @@ WORKDIR /var/www/html
 # permissoes
 RUN chown -R www-data:www-data /var/www/html
 
+RUN apt-get update && apt-get install -y \
+    git zip unzip libpng-dev libonig-dev libxml2-dev curl \
+    libzstd-dev libzip-dev
+
+RUN pecl install redis \
+    && docker-php-ext-enable redis
+
+
 EXPOSE 9000
 CMD ["php-fpm"]

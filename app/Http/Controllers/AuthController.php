@@ -92,11 +92,35 @@ class AuthController extends Controller
     // Logout
     public function logout(Request $request)
     {
-        $request->user()->token()->revoke();
+        try {
+            $user = $request->user();
 
-        return response()->json([
-            'message' => 'Logged out successfully',
-        ]);
+            if (!$user) {
+                return response()->json([
+                    'error' => 'Invalid or expired token.',
+                ], 401);
+            }
+
+            $token = $user->token();
+
+            if (!$token) {
+                return response()->json([
+                    'error' => 'Token not found or already revoked.',
+                ], 400);
+            }
+
+            $token->revoke();
+
+            return response()->json([
+                'message' => 'Logged out successfully.',
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'An unexpected error occurred during logout.',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
     }
 
     // Refresh Token
