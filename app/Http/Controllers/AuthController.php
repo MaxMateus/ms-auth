@@ -5,21 +5,23 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use App\Http\Requests\RegisterRequest;
 use App\Services\UserService;
+use App\Services\TokenCacheService;
 use Illuminate\Support\Facades\Log;
-use Laravel\Passport\Token;
 use Illuminate\Support\Facades\DB;
+use Laravel\Passport\Token;
 
 class AuthController extends Controller
 {
     protected UserService $userService;
+    protected TokenCacheService $tokenCacheService;
 
-    public function __construct(UserService $userService)
+    public function __construct(UserService $userService, TokenCacheService $tokenCacheService)
     {
         $this->userService = $userService;
+        $this->tokenCacheService = $tokenCacheService;
     }
 
     public function register(RegisterRequest $request)
@@ -81,7 +83,14 @@ class AuthController extends Controller
         
         /** @var \App\Models\User $user */
         $user = Auth::user();
-        $token = $user->createToken('authToken')->accessToken;
+        $tokenResult = $user->createToken('authToken');
+        $token = $tokenResult->accessToken;
+
+        $this->tokenCacheService->store($tokenResult->token, [
+            'user_id' => $user->getKey(),
+            'client_id' => $tokenResult->token->client_id,
+            'scopes' => $tokenResult->token->scopes,
+        ]);
 
         return response()->json([
             'token' => $token,
@@ -109,6 +118,7 @@ class AuthController extends Controller
                 ], 400);
             }
 
+            $this->tokenCacheService->forget($token->id);
             $token->revoke();
 
             return response()->json([
@@ -136,45 +146,59 @@ class AuthController extends Controller
                 ], 400);
             }
 
-            // Extrai o token JWT
-            $tokenValue = substr($authHeader, 7);
-            
-            // Decodifica o JWT para obter o jti (JWT ID)
-            try {
-                $tokenParts = explode('.', $tokenValue);
-                if (count($tokenParts) !== 3) {
-                    throw new \Exception('Token malformado');
-                }
-                
-                $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $tokenParts[1])), true);
-                if (!$payload || !isset($payload['jti'])) {
-                    throw new \Exception('Payload inválido');
-                }
-                
-                $jti = $payload['jti'];
-            } catch (\Exception $e) {
+            $jti = $this->extractTokenId($authHeader);
+            if (!$jti) {
                 return response()->json([
                     'message' => 'Token malformado.',
                     'error' => 'malformed_token'
                 ], 400);
             }
-            
-            // Busca o token no banco usando o JTI
-            $token = DB::table('oauth_access_tokens')
-                      ->where('id', $jti)
-                      ->where('revoked', false)
-                      ->where('expires_at', '>', now())
-                      ->first();
-            
-            if (!$token) {
-                return response()->json([
-                    'message' => 'Token inválido ou expirado.',
-                    'error' => 'invalid_token'
-                ], 400);
+
+            $cachedToken = $this->tokenCacheService->get($jti);
+            $userId = $cachedToken['user_id'] ?? null;
+
+            $passportToken = null;
+
+            if ($cachedToken) {
+                $tokenIsValid = Token::query()
+                    ->where('id', $jti)
+                    ->where('revoked', false)
+                    ->where('expires_at', '>', now())
+                    ->exists();
+
+                if (!$tokenIsValid) {
+                    $this->tokenCacheService->forget($jti);
+
+                    return response()->json([
+                        'message' => 'Token inválido ou expirado.',
+                        'error' => 'invalid_token'
+                    ], 400);
+                }
+            } else {
+                $passportToken = Token::query()
+                    ->where('id', $jti)
+                    ->where('revoked', false)
+                    ->where('expires_at', '>', now())
+                    ->first();
+
+                if (!$passportToken) {
+                    return response()->json([
+                        'message' => 'Token inválido ou expirado.',
+                        'error' => 'invalid_token'
+                    ], 400);
+                }
+
+                $userId = $passportToken->user_id;
+
+                $this->tokenCacheService->store($passportToken, [
+                    'user_id' => $passportToken->user_id,
+                    'client_id' => $passportToken->client_id,
+                    'scopes' => $passportToken->scopes,
+                ]);
             }
 
             // Busca o usuário
-            $user = User::find($token->user_id);
+            $user = User::find($userId);
             if (!$user) {
                 return response()->json([
                     'message' => 'Usuário não encontrado.',
@@ -184,11 +208,19 @@ class AuthController extends Controller
 
             // Revoga o token atual
             DB::table('oauth_access_tokens')
-              ->where('id', $jti)
-              ->update(['revoked' => true]);
-            
+                ->where('id', $jti)
+                ->update(['revoked' => true]);
+            $this->tokenCacheService->forget($jti);
+
             // Cria um novo token
-            $newToken = $user->createToken('authToken')->accessToken;
+            $newTokenResult = $user->createToken('authToken');
+            $newToken = $newTokenResult->accessToken;
+
+            $this->tokenCacheService->store($newTokenResult->token, [
+                'user_id' => $user->getKey(),
+                'client_id' => $newTokenResult->token->client_id,
+                'scopes' => $newTokenResult->token->scopes,
+            ]);
 
             return response()->json([
                 'token' => $newToken,
@@ -203,6 +235,31 @@ class AuthController extends Controller
                 'message' => 'Token inválido ou expirado.',
                 'error' => 'invalid_token'
             ], 400);
+        }
+    }
+
+    private function extractTokenId(string $authHeader): ?string
+    {
+        $tokenValue = substr($authHeader, 7);
+
+        try {
+            $tokenParts = explode('.', $tokenValue);
+            if (count($tokenParts) !== 3) {
+                throw new \Exception('Token malformado');
+            }
+
+            $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $tokenParts[1])), true);
+            if (!$payload || !isset($payload['jti'])) {
+                throw new \Exception('Payload inválido');
+            }
+
+            return $payload['jti'];
+        } catch (\Exception $e) {
+            Log::warning('Falha ao extrair JTI do token', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
         }
     }
 }
