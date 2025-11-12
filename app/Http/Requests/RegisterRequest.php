@@ -2,9 +2,11 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\ValidCpf;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Validation\Rule;
-use App\Models\User;
 
 class RegisterRequest extends FormRequest
 {
@@ -27,18 +29,18 @@ class RegisterRequest extends FormRequest
             'name' => ['required', 'string', 'min:3', 'max:255'],
             'email' => ['required', 'email', 'max:255'],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
-            'cpf' => ['required', 'string', 'min:11', 'max:14'], // Permite CPF com ou sem formatação
-            'phone' => ['required', 'string', 'min:10', 'max:15'], // Permite telefone com formatação
+            'cpf' => ['required', 'string', 'min:11', 'max:14', new ValidCpf()],
+            'phone' => ['required', 'string', 'min:10', 'max:15'],
             'birthdate' => ['required', 'date', 'before:-18 years'],
-            'gender' => ['required', Rule::in(['M','F','Outro'])],
+            'gender' => ['required', Rule::in(['M', 'F', 'Outro'])],
             'accept_terms' => ['required', 'accepted'],
             'street' => ['required', 'string', 'max:255'],
             'number' => ['required', 'string', 'max:10'],
-            'complement' => ['nullable', 'string', 'max:100'], // Opcional
+            'complement' => ['nullable', 'string', 'max:100'],
             'neighborhood' => ['required', 'string', 'max:100'],
             'city' => ['required', 'string', 'max:100'],
             'state' => ['required', 'string', 'size:2'],
-            'zip_code' => ['required', 'string', 'min:8', 'max:10'], // Permite CEP com ou sem formatação
+            'zip_code' => ['required', 'string', 'min:8', 'max:10'],
         ];
     }
 
@@ -56,6 +58,7 @@ class RegisterRequest extends FormRequest
             'password.min' => 'A senha deve ter pelo menos 8 caracteres.',
             'password.confirmed' => 'A confirmação da senha não confere.',
             'cpf.required' => 'O CPF é obrigatório.',
+            'cpf.valid_cpf' => 'O CPF informado não é válido.',
             'phone.required' => 'O telefone é obrigatório.',
             'birthdate.required' => 'A data de nascimento é obrigatória.',
             'birthdate.before' => 'Você deve ser maior de 18 anos.',
@@ -72,5 +75,12 @@ class RegisterRequest extends FormRequest
             'zip_code.required' => 'O CEP é obrigatório.',
         ];
     }
-    
+
+    protected function failedValidation(Validator $validator): void
+    {
+        throw new HttpResponseException(response()->json([
+            'message' => $validator->errors()->first(),
+            'errors' => $validator->errors(),
+        ], 422));
+    }
 }

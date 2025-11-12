@@ -3,8 +3,10 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\UserStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Passport\HasApiTokens;
 
@@ -34,6 +36,7 @@ class User extends Authenticatable
         'city', 
         'state', 
         'zip_code',
+        'status',
     ];
 
     /**
@@ -57,6 +60,12 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'birthdate' => 'date',
             'accept_terms' => 'boolean',
+            'status' => UserStatus::class,
         ];
+    }
+
+    public function mfaMethods(): HasMany
+    {
+        return $this->hasMany(MfaMethod::class);
     }
 }

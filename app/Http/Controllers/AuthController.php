@@ -2,64 +2,53 @@
 
 namespace App\Http\Controllers;
 
+use App\DTOs\RegisterUserDTO;
+use App\Enums\UserStatus;
+use App\Exceptions\InvalidCpfException;
+use App\Exceptions\UserAlreadyExistsException;
+use App\Http\Requests\RegisterRequest;
+use App\Models\MfaMethod;
 use App\Models\User;
+use App\Services\EmailVerificationService;
+use App\Services\RegisterUserService;
+use App\Services\TokenCacheService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Validation\ValidationException;
-use App\Http\Requests\RegisterRequest;
-use App\Services\UserService;
-use App\Services\TokenCacheService;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Log;
 use Laravel\Passport\Token;
 
 class AuthController extends Controller
 {
-    protected UserService $userService;
-    protected TokenCacheService $tokenCacheService;
-
-    public function __construct(UserService $userService, TokenCacheService $tokenCacheService)
-    {
-        $this->userService = $userService;
-        $this->tokenCacheService = $tokenCacheService;
+    public function __construct(
+        private readonly RegisterUserService $registerUserService,
+        private readonly EmailVerificationService $emailVerificationService,
+        private readonly TokenCacheService $tokenCacheService,
+    ) {
     }
 
     public function register(RegisterRequest $request)
     {
-        $data = $request->validated();
-        // Verificar se usuário já existe
-        $existingUserCheck = $this->userService->checkUserExists($data['email'], $data['cpf']);
-        
-        if ($existingUserCheck['exists']) {
-            return response()->json([
-                'message' => 'Usuário já cadastrado no sistema.',
-                'errors' => $existingUserCheck['conflicts']
-            ], 400);
-        }
-
-        if (!$this->userService->validateCpfFormat($data['cpf'])) {
-            return response()->json([
-                'message' => 'O CPF informado não é válido.',
-            ], 422);
-        }
-
         try {
-            $user = $this->userService->createUser($data);
+            $this->registerUserService->register(RegisterUserDTO::fromRequest($request));
 
             return response()->json([
-                'message' => 'Usuário registrado com sucesso',
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'cpf' => $user->cpf,
-                    'phone' => $user->phone,
-                    'created_at' => $user->created_at,
-                ],
+                'message' => 'Usuário criado com sucesso. Verifique seu e-mail para ativar a conta.'
             ], 201);
-        } catch (\Exception $e) {
-            // Log do erro para debug
-            Log::error('Erro no registro de usuário: ' . $e->getMessage());
+        } catch (UserAlreadyExistsException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'errors' => $exception->conflicts(),
+            ], 409);
+        } catch (InvalidCpfException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        } catch (\Throwable $e) {
+            Log::error('Erro no registro de usuário', [
+                'error' => $e->getMessage(),
+            ]);
 
             return response()->json([
                 'message' => 'Erro interno do servidor'
@@ -83,6 +72,15 @@ class AuthController extends Controller
         
         /** @var \App\Models\User $user */
         $user = Auth::user();
+
+        if ($user->status !== UserStatus::Active || !$user->email_verified_at) {
+            Auth::logout();
+
+            return response()->json([
+                'message' => 'Conta ainda não ativada. Verifique seu e-mail antes de fazer login.'
+            ], 403);
+        }
+
         $tokenResult = $user->createToken('authToken');
         $token = $tokenResult->accessToken;
 
@@ -131,6 +129,58 @@ class AuthController extends Controller
                 'details' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    public function verifyEmail(Request $request)
+    {
+        $request->validate([
+            'token' => ['required', 'string']
+        ]);
+
+        $token = $request->query('token');
+        $payload = $this->emailVerificationService->getPayload($token);
+
+        if (!$payload) {
+            return response()->json([
+                'message' => 'Token inválido.'
+            ], 400);
+        }
+
+        if ($this->emailVerificationService->tokenExpired($payload)) {
+            $this->emailVerificationService->delete($token);
+
+            return response()->json([
+                'message' => 'Token expirado.'
+            ], 422);
+        }
+
+        $user = User::find($payload['user_id'] ?? null);
+
+        if (!$user || $user->email !== ($payload['email'] ?? null)) {
+            $this->emailVerificationService->delete($token);
+
+            return response()->json([
+                'message' => 'Token inválido.'
+            ], 400);
+        }
+
+        DB::transaction(function () use ($user) {
+            $user->forceFill([
+                'email_verified_at' => now(),
+                'status' => UserStatus::Active,
+            ])->save();
+
+            MfaMethod::updateOrCreate(
+                ['user_id' => $user->id, 'method' => 'email'],
+                ['destination' => $user->email, 'verified' => true]
+            );
+        });
+
+        $this->emailVerificationService->delete($token);
+
+        return response()->json([
+            'message' => 'E-mail confirmado com sucesso. Sua conta está ativa.'
+        ]);
     }
 
     // Refresh Token
@@ -262,4 +312,5 @@ class AuthController extends Controller
             return null;
         }
     }
+
 }

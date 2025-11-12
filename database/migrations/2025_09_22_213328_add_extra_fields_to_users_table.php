@@ -14,8 +14,8 @@ return new class extends Migration
         Schema::table('users', function (Blueprint $table) {
             $table->string('cpf', 11)->nullable()->unique()->after('email');
             $table->string('phone', 15)->after('cpf');
-            $table->date('birthdate')->nullable()->after('phone');
-            $table->enum('gender', ['M', 'F', 'Outro'])->nullable()->after('birthdate');
+            $table->date('birthdate')->after('phone');
+            $table->enum('gender', ['M', 'F', 'Outro'])->after('birthdate');
             $table->boolean('accept_terms')->default(false)->after('gender');
 
             // Endereço

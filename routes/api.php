@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 Route::prefix('auth')->middleware(['validate.json'])->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::get('/verify-email', [AuthController::class, 'verifyEmail']);
     Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:api');
     Route::post('/refresh', [AuthController::class, 'refresh']);
 });
