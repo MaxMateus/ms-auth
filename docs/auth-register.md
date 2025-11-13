@@ -11,10 +11,10 @@ Documentação detalhada do endpoint responsável pelo cadastro de usuários e d
 | **Endpoint** | `POST /api/auth/register` |
 | **Headers obrigatórios** | `Content-Type: application/json` |
 | **Autenticação** | Não requer token |
-| **Fila/Jobs** | Sim – `SendVerificationEmailJob` |
+| **Fila/Jobs** | Sim – `DispatchMfaCodeJob` |
 | **Status possíveis** | `201`, `409`, `422`, `500` |
 
-O endpoint cria um novo usuário com status `pending_verification`, gera o token de verificação (TTL de 15 minutos, armazenado em cache/Redis) e enfileira o envio do e-mail de confirmação via SendGrid.
+O endpoint cria um novo usuário com status `pending_verification`, gera um código MFA de 6 dígitos (TTL de 5 minutos, armazenado na tabela `mfa_codes`) e enfileira o envio do e-mail de confirmação via SendGrid.
 
 ---
 
@@ -83,14 +83,14 @@ Outras regras aplicadas pelo serviço:
 ## 🔐 Fluxo de Verificação de E-mail
 
 1. Usuário é criado com status `pending_verification`.
-2. `EmailVerificationService` gera token (UUID) com TTL de 15 minutos e salva em cache (prefixo `email_verifications:`).
-3. `SendVerificationEmailJob` é enfileirado contendo nome, e-mail e token.
-4. Worker (`php artisan queue:work`) executa o job, que chama `SendGridService` para enviar o e-mail com o link `GET /api/auth/verify-email?token=UUID`.
-5. Ao confirmar, o endpoint de verificação:
-   - valida o token (existência + prazo),
-   - atualiza `email_verified_at` e `status = active`,
-   - registra o método `email` como verificado em `mfa_methods`,
-   - remove o token do cache.
+2. `MfaService` registra o método `email` em `mfa_methods` e grava o código na tabela `mfa_codes` com validade de 5 minutos.
+3. `DispatchMfaCodeJob` é enfileirado contendo método, destino, código e nome do usuário.
+4. Worker (`php artisan queue:work`) executa o job e utiliza `SendGridEmailService` para enviar o e-mail com o link `GET /api/mfa/verify-link`.
+5. Ao confirmar pelo link ou pelo endpoint `/api/mfa/verify`:
+   - o código é validado (existência + prazo + uso),
+   - `email_verified_at` é preenchido e `status` passa para `active`,
+   - o método `email` é marcado como verificado em `mfa_methods`,
+   - o código utilizado é invalidado.
 
 ---
 
@@ -119,10 +119,10 @@ flowchart TD
     E -->|Sim| F{E-mail/CPF já existem?}
     F -->|Sim| F1[409 - Conflito]
     F -->|Não| G[Cria usuário (status pending_verification)]
-    G --> H[EmailVerificationService gera token + cache]
-    H --> I[Enfileira SendVerificationEmailJob]
+    G --> H[MfaService cria código + mfa_methods/mfa_codes]
+    H --> I[DispatchMfaCodeJob enfileirado]
     I --> J[Resposta 201: "Verifique seu e-mail"]
-    I --> K[Worker executa job e envia e-mail via SendGrid]
+    I --> K[Worker envia e-mail via SendGridEmailService]
 ```
 
 ---

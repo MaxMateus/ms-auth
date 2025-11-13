@@ -2,6 +2,8 @@
 
 namespace App\Repositories;
 
+use App\Enums\UserStatus;
+use App\Exceptions\UserNotFoundException;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
@@ -25,6 +27,29 @@ class UserRepository
             ->exists();
     }
 
+    public function findByEmail(string $email): ?User
+    {
+        return $this->model->newQuery()
+            ->where('email', $email)
+            ->first();
+    }
+
+    public function findById(int $userId): ?User
+    {
+        return $this->model->newQuery()->find($userId);
+    }
+
+    public function requireById(int $userId): User
+    {
+        $user = $this->findById($userId);
+
+        if (!$user) {
+            throw UserNotFoundException::create();
+        }
+
+        return $user;
+    }
+
     public function create(array $attributes): User
     {
         try {
@@ -38,5 +63,15 @@ class UserRepository
 
             throw $exception;
         }
+    }
+
+    public function activate(User $user): User
+    {
+        $user->forceFill([
+            'email_verified_at' => now(),
+            'status' => UserStatus::Active->value,
+        ])->save();
+
+        return $user;
     }
 }

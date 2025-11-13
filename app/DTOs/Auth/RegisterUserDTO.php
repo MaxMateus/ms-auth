@@ -1,8 +1,9 @@
 <?php
 
-namespace App\DTOs;
+namespace App\DTOs\Auth;
 
-use App\Http\Requests\RegisterRequest;
+use App\Helpers\ContactFormatter;
+use App\Http\Requests\Auth\RegisterRequest;
 
 class RegisterUserDTO
 {
@@ -34,10 +35,10 @@ class RegisterUserDTO
     {
         return new self(
             name: trim($data['name']),
-            email: strtolower(trim($data['email'])),
+            email: ContactFormatter::normalizeEmail($data['email']),
             password: $data['password'],
-            cpf: self::onlyDigits($data['cpf']),
-            phone: self::onlyDigits($data['phone']),
+            cpf: ContactFormatter::digitsOnly($data['cpf']),
+            phone: ContactFormatter::digitsOnly($data['phone']),
             birthdate: $data['birthdate'],
             gender: $data['gender'],
             acceptTerms: (bool) $data['accept_terms'],
@@ -49,7 +50,7 @@ class RegisterUserDTO
             neighborhood: trim($data['neighborhood']),
             city: trim($data['city']),
             state: strtoupper(trim($data['state'])),
-            zipCode: self::onlyDigits($data['zip_code']),
+            zipCode: ContactFormatter::digitsOnly($data['zip_code']),
         );
     }
 
@@ -74,8 +75,4 @@ class RegisterUserDTO
         ];
     }
 
-    private static function onlyDigits(string $value): string
-    {
-        return preg_replace('/\D/', '', $value) ?? '';
-    }
 }

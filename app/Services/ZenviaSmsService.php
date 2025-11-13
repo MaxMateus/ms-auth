@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Helpers\ContactFormatter;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -57,8 +58,6 @@ class ZenviaSmsService
 
     private function formatPhone(string $phoneNumber): string
     {
-        $digits = preg_replace('/\D/', '', $phoneNumber) ?? '';
-
-        return str_starts_with($digits, '55') ? $digits : '55' . $digits;
+        return ContactFormatter::normalizePhone($phoneNumber);
     }
 }

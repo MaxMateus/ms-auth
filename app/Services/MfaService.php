@@ -2,110 +2,112 @@
 
 namespace App\Services;
 
-use App\Models\MfaCode;
+use App\DTOs\Mfa\SendMfaCodeDTO;
+use App\DTOs\Mfa\VerifyMfaCodeDTO;
+use App\Exceptions\Mfa\InvalidMfaCodeException;
+use App\Exceptions\Mfa\MfaMethodNotFoundException;
+use App\Jobs\DispatchMfaCodeJob;
 use App\Models\MfaMethod;
 use App\Models\User;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
+use App\Repositories\MfaCodeRepository;
+use App\Repositories\MfaMethodRepository;
+use App\Repositories\UserRepository;
+use App\Support\TransactionManager;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection;
 
 class MfaService
 {
+    private const CODE_TTL_MINUTES = 5;
+
     public function __construct(
-        private readonly SendGridEmailService $sendGridEmailService,
-        private readonly ZenviaSmsService $zenviaSmsService,
-        private readonly WhatsappMetaService $whatsappMetaService,
+        private readonly MfaCodeRepository $mfaCodeRepository,
+        private readonly MfaMethodRepository $mfaMethodRepository,
+        private readonly UserRepository $userRepository,
+        private readonly TransactionManager $transactionManager,
     ) {
     }
 
-    public function sendCode(User $user, string $method, string $destination): void
+    public function sendCode(SendMfaCodeDTO $dto, ?User $authenticatedUser = null): void
     {
+        $user = $this->resolveUser($dto->method, $dto->destination, $authenticatedUser);
         $code = $this->generateCode();
 
-        DB::transaction(function () use ($user, $method, $destination, $code) {
-            MfaMethod::query()->updateOrCreate(
-                [
-                    'user_id' => $user->getKey(),
-                    'method' => $method,
-                ],
-                [
-                    'destination' => $destination,
-                    'verified' => false,
-                ]
-            );
-
-            MfaCode::query()
-                ->where('user_id', $user->getKey())
-                ->where('method', $method)
-                ->where('destination', $destination)
-                ->where('used', false)
-                ->update(['used' => true]);
-
-            MfaCode::query()->create([
-                'user_id' => $user->getKey(),
-                'method' => $method,
-                'destination' => $destination,
-                'code' => $code,
-                'used' => false,
-                'expires_at' => now()->addMinutes(5),
-            ]);
+        $this->transactionManager->run(function () use ($user, $dto, $code) {
+            $this->mfaMethodRepository->upsert($user, $dto->method, $dto->destination, false);
+            $this->mfaCodeRepository->invalidateExisting($user, $dto->method, $dto->destination);
+            $this->mfaCodeRepository->create($user, $dto->method, $dto->destination, $code, $this->expiresAt());
         });
 
-        $this->dispatchCode($method, $destination, $code, $user);
+        $this->queueDispatch($dto->method, $dto->destination, $code, $user->name);
     }
 
-    public function verifyCode(User $user, string $method, string $destination, string $code): MfaMethod
+    public function verifyCode(VerifyMfaCodeDTO $dto, ?User $authenticatedUser = null): MfaMethod
     {
-        $mfaCode = MfaCode::query()
-            ->where('user_id', $user->getKey())
-            ->where('method', $method)
-            ->where('destination', $destination)
-            ->where('code', $code)
-            ->where('used', false)
-            ->where('expires_at', '>', now())
-            ->first();
+        $user = $this->resolveUser($dto->method, $dto->destination, $authenticatedUser);
+        $mfaCode = $this->mfaCodeRepository->findValid($user, $dto->method, $dto->destination, $dto->code);
 
         if (!$mfaCode) {
-            throw ValidationException::withMessages([
-                'code' => ['Código inválido ou expirado.'],
-            ]);
+            throw InvalidMfaCodeException::create();
         }
 
-        return DB::transaction(function () use ($mfaCode, $user, $method, $destination) {
-            $mfaCode->forceFill(['used' => true])->save();
+        /** @var MfaMethod $method */
+        $method = $this->transactionManager->run(function () use ($mfaCode, $user, $dto) {
+            $this->mfaCodeRepository->markAsUsed($mfaCode);
 
-            /** @var MfaMethod $methodModel */
-            $methodModel = MfaMethod::query()->updateOrCreate(
-                [
-                    'user_id' => $user->getKey(),
-                    'method' => $method,
-                ],
-                [
-                    'destination' => $destination,
-                    'verified' => true,
-                ]
+            $methodModel = $this->mfaMethodRepository->upsert(
+                $user,
+                $dto->method,
+                $dto->destination,
+                true,
             );
 
-            $methodModel->forceFill([
-                'verified' => true,
-                'destination' => $destination,
-            ])->save();
-
-            return $methodModel;
+            return $this->mfaMethodRepository->markAsVerified($methodModel, $dto->destination);
         });
+
+        if ($dto->method === 'email') {
+            $this->userRepository->activate($user);
+        }
+
+        return $method;
     }
 
-    private function dispatchCode(string $method, string $destination, string $code, User $user): void
+    public function listMethods(User $user): Collection
     {
-        match ($method) {
-            'email' => $this->sendGridEmailService->sendVerificationCode($destination, $code, $user->name),
-            'sms' => $this->zenviaSmsService->sendVerificationCode($destination, $code),
-            'whatsapp' => $this->whatsappMetaService->sendVerificationCode($destination, $code),
-            default => null,
-        };
+        return $this->mfaMethodRepository->listForUser($user);
+    }
+
+    private function resolveUser(string $method, string $destination, ?User $authenticatedUser): User
+    {
+        if ($method === 'email') {
+            $user = $this->userRepository->findByEmail($destination);
+
+            if (!$user) {
+                throw MfaMethodNotFoundException::forEmail();
+            }
+
+            return $user;
+        }
+
+        if (!$authenticatedUser) {
+            throw MfaMethodNotFoundException::requiresAuthentication();
+        }
+
+        return $authenticatedUser;
+    }
+
+    private function queueDispatch(string $method, string $destination, string $code, ?string $userName = null): void
+    {
+        DispatchMfaCodeJob::dispatch($method, $destination, $code, $userName);
     }
 
     private function generateCode(): string
     {
-        return str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        return str_pad((string) random_int(0, 999_999), 6, '0', STR_PAD_LEFT);
+    }
+
+    private function expiresAt(): CarbonImmutable
+    {
+        return CarbonImmutable::now()->addMinutes(self::CODE_TTL_MINUTES);
     }
 }

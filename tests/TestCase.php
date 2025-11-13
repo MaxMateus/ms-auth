@@ -12,6 +12,6 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
 
-        config(['email_verification.store' => 'array']);
+        config(['logging.default' => 'errorlog']);
     }
 }

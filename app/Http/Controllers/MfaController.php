@@ -2,17 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\UserStatus;
-use App\Models\MfaMethod;
-use App\Models\User;
+use App\DTOs\Mfa\SendMfaCodeDTO;
+use App\DTOs\Mfa\VerifyMfaCodeDTO;
+use App\Exceptions\Mfa\InvalidMfaCodeException;
+use App\Exceptions\Mfa\MfaMethodNotFoundException;
+use App\Http\Requests\Mfa\SendMfaCodeRequest;
+use App\Http\Requests\Mfa\VerifyMfaCodeRequest;
+use App\Http\Requests\Mfa\VerifyMfaLinkRequest;
 use App\Services\MfaService;
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 
 class MfaController extends Controller
 {
@@ -25,90 +25,28 @@ class MfaController extends Controller
         $user = $request->user();
 
         return response()->json([
-            'methods' => $user->mfaMethods()
-                ->get(['id', 'method', 'destination', 'verified', 'created_at', 'updated_at']),
+            'methods' => $this->mfaService->listMethods($user),
         ]);
     }
 
-    public function send(Request $request): JsonResponse
+    public function send(SendMfaCodeRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'method' => ['required', Rule::in(['email', 'sms', 'whatsapp'])],
-            'destination' => ['required', 'string'],
-        ]);
-
-        $method = $data['method'];
-        $destination = $this->normalizeDestination($method, $data['destination']);
-
-        try {
-            $user = $this->resolveUserForMethod($request, $method, $destination);
-        } catch (AuthenticationException $exception) {
-            return response()->json([
-                'message' => $exception->getMessage(),
-            ], 401);
-        } catch (\RuntimeException $exception) {
-            return response()->json([
-                'message' => $exception->getMessage(),
-            ], 404);
-        }
-
-        try {
-            $this->mfaService->sendCode($user, $method, $destination);
-        } catch (\Throwable $exception) {
-            Log::error('Failed to send MFA code', [
-                'method' => $method,
-                'destination' => $destination,
-                'error' => $exception->getMessage(),
-            ]);
-
-            return response()->json([
-                'message' => 'Não foi possível enviar o código. Tente novamente.',
-            ], 500);
-        }
+        $this->mfaService->sendCode(
+            SendMfaCodeDTO::fromRequest($request),
+            $request->user('api') ?? $request->user()
+        );
 
         return response()->json([
             'message' => 'Código enviado com sucesso.',
-        ], 200);
+        ]);
     }
 
-    public function verify(Request $request): JsonResponse
+    public function verify(VerifyMfaCodeRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'method' => ['required', Rule::in(['email', 'sms', 'whatsapp'])],
-            'destination' => ['required', 'string'],
-            'code' => ['required', 'digits:6'],
-        ]);
-
-        $method = $data['method'];
-        $destination = $this->normalizeDestination($method, $data['destination']);
-        $code = $data['code'];
-
-        try {
-            $methodModel = $this->performVerification($request, $method, $destination, $code);
-        } catch (AuthenticationException $exception) {
-            return response()->json([
-                'message' => $exception->getMessage(),
-            ], 401);
-        } catch (\RuntimeException $exception) {
-            return response()->json([
-                'message' => $exception->getMessage(),
-            ], 404);
-        } catch (ValidationException $exception) {
-            return response()->json([
-                'message' => 'Código inválido ou expirado.',
-                'errors' => $exception->errors(),
-            ], 422);
-        } catch (\Throwable $exception) {
-            Log::error('Failed to verify MFA code', [
-                'method' => $method,
-                'destination' => $destination,
-                'error' => $exception->getMessage(),
-            ]);
-
-            return response()->json([
-                'message' => 'Não foi possível verificar o código.',
-            ], 500);
-        }
+        $methodModel = $this->mfaService->verifyCode(
+            VerifyMfaCodeDTO::fromRequest($request),
+            $request->user('api') ?? $request->user()
+        );
 
         return response()->json([
             'message' => 'Método verificado com sucesso.',
@@ -116,30 +54,14 @@ class MfaController extends Controller
         ]);
     }
 
-    public function verifyLink(Request $request)
+    public function verifyLink(VerifyMfaLinkRequest $request)
     {
-        $data = $request->validate([
-            'method' => ['required', Rule::in(['email', 'sms', 'whatsapp'])],
-            'destination' => ['required', 'string'],
-            'code' => ['required', 'digits:6'],
-        ]);
-
-        $method = $data['method'];
-        $destination = $this->normalizeDestination($method, $data['destination']);
-        $code = $data['code'];
-
         try {
-            $this->performVerification($request, $method, $destination, $code);
-        } catch (AuthenticationException $exception) {
-            return $this->verificationView(false, $exception->getMessage(), 401);
-        } catch (\RuntimeException $exception) {
-            return $this->verificationView(false, $exception->getMessage(), 404);
-        } catch (ValidationException $exception) {
-            return $this->verificationView(false, 'Código inválido ou expirado.', 422);
+            $this->mfaService->verifyCode(VerifyMfaCodeDTO::fromLinkRequest($request));
+        } catch (MfaMethodNotFoundException|InvalidMfaCodeException $exception) {
+            return $this->verificationView(false, $exception->getMessage(), $exception instanceof MfaMethodNotFoundException ? $exception->status() : 422);
         } catch (\Throwable $exception) {
-            Log::error('Failed to verify MFA code', [
-                'method' => $method,
-                'destination' => $destination,
+            Log::error('Failed to verify MFA code via link', [
                 'error' => $exception->getMessage(),
             ]);
 
@@ -147,67 +69,6 @@ class MfaController extends Controller
         }
 
         return $this->verificationView(true, 'Método verificado com sucesso.');
-    }
-
-    private function resolveUserForMethod(Request $request, string $method, string $destination): User
-    {
-        if ($method === 'email') {
-            $user = User::query()->where('email', $destination)->first();
-
-            if (!$user) {
-                throw new \RuntimeException('Usuário não encontrado para este e-mail.');
-            }
-
-            return $user;
-        }
-
-        $user = $request->user() ?? Auth::guard('api')->user();
-
-        if (!$user) {
-            throw new AuthenticationException('Autenticação obrigatória para este método.');
-        }
-
-        return $user;
-    }
-
-    private function normalizeDestination(string $method, string $destination): string
-    {
-        $normalized = trim($destination);
-
-        if ($method === 'email') {
-            return strtolower($normalized);
-        }
-
-        $digits = preg_replace('/\D/', '', $normalized) ?? '';
-
-        if ($digits === '') {
-            throw ValidationException::withMessages([
-                'destination' => ['Destino inválido.'],
-            ]);
-        }
-
-        return $digits;
-    }
-
-    private function activateUser(User $user): void
-    {
-        $user->forceFill([
-            'email_verified_at' => now(),
-            'status' => UserStatus::Active,
-        ])->save();
-    }
-
-    private function performVerification(Request $request, string $method, string $destination, string $code): MfaMethod
-    {
-        $user = $this->resolveUserForMethod($request, $method, $destination);
-
-        $methodModel = $this->mfaService->verifyCode($user, $method, $destination, $code);
-
-        if ($method === 'email') {
-            $this->activateUser($user);
-        }
-
-        return $methodModel;
     }
 
     private function verificationView(bool $success, string $message, int $status = 200)
