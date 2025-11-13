@@ -6,9 +6,9 @@ use App\DTOs\RegisterUserDTO;
 use App\Enums\UserStatus;
 use App\Exceptions\InvalidCpfException;
 use App\Exceptions\UserAlreadyExistsException;
-use App\Jobs\SendVerificationEmailJob;
 use App\Models\User;
 use App\Repositories\UserRepository;
+use App\Services\MfaService;
 use App\Support\CpfValidator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -18,7 +18,7 @@ class RegisterUserService
 {
     public function __construct(
         private readonly UserRepository $userRepository,
-        private readonly EmailVerificationService $emailVerificationService,
+        private readonly MfaService $mfaService,
     ) {
     }
 
@@ -42,22 +42,23 @@ class RegisterUserService
             throw new UserAlreadyExistsException($conflicts);
         }
 
-        return DB::transaction(function () use ($dto) {
+        $user = DB::transaction(function () use ($dto) {
             $hashedPassword = Hash::make($dto->password);
             $attributes = $dto->toUserAttributes($hashedPassword);
             $attributes['status'] = UserStatus::PendingVerification->value;
 
             $user = $this->userRepository->create($attributes);
 
-            $token = $this->emailVerificationService->createToken($user);
-            SendVerificationEmailJob::dispatch($user->name, $user->email, $token);
-
-            Log::info('User registered and verification email dispatched', [
+            Log::info('User registered and verification code dispatched', [
                 'user_id' => $user->id,
                 'email' => $user->email,
             ]);
 
             return $user;
         });
+
+        $this->mfaService->sendCode($user, 'email', $user->email);
+
+        return $user;
     }
 }

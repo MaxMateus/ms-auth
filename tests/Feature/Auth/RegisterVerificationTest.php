@@ -3,23 +3,19 @@
 namespace Tests\Feature\Auth;
 
 use App\Enums\UserStatus;
-use App\Jobs\SendVerificationEmailJob;
+use App\Models\MfaCode;
+use App\Models\MfaMethod;
 use App\Models\User;
-use App\Services\EmailVerificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class RegisterVerificationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_user_registration_creates_pending_user_and_dispatches_job(): void
+    public function test_user_registration_creates_pending_user_and_creates_email_mfa_code(): void
     {
-        Queue::fake();
-
         $response = $this->postJson('/api/auth/register', $this->validPayload());
 
         $response->assertCreated()
@@ -27,13 +23,25 @@ class RegisterVerificationTest extends TestCase
                 'message' => 'Usuário criado com sucesso. Verifique seu e-mail para ativar a conta.',
             ]);
 
+        $user = User::query()->where('email', 'max@example.com')->firstOrFail();
+
         $this->assertDatabaseHas('users', [
-            'email' => 'max@example.com',
+            'id' => $user->id,
             'status' => UserStatus::PendingVerification->value,
-            'cpf' => '12345678909',
         ]);
 
-        Queue::assertPushed(SendVerificationEmailJob::class);
+        $this->assertDatabaseHas('mfa_methods', [
+            'user_id' => $user->id,
+            'method' => 'email',
+            'verified' => false,
+        ]);
+
+        $this->assertDatabaseHas('mfa_codes', [
+            'user_id' => $user->id,
+            'method' => 'email',
+            'destination' => 'max@example.com',
+            'used' => false,
+        ]);
     }
 
     public function test_registration_with_existing_email_returns_conflict(): void
@@ -57,8 +65,6 @@ class RegisterVerificationTest extends TestCase
 
     public function test_email_verification_activates_user_and_registers_mfa_method(): void
     {
-        Queue::fake();
-
         /** @var User $user */
         $user = User::factory()->unverified()->create([
             'email' => 'verify@example.com',
@@ -66,15 +72,33 @@ class RegisterVerificationTest extends TestCase
             'cpf' => '55566677788',
         ]);
 
-        /** @var EmailVerificationService $service */
-        $service = app(EmailVerificationService::class);
-        $token = $service->createToken($user);
+        MfaMethod::query()->create([
+            'user_id' => $user->id,
+            'method' => 'email',
+            'destination' => $user->email,
+            'verified' => false,
+        ]);
 
-        $response = $this->getJson('/api/auth/verify-email?token=' . $token);
+        $code = '123456';
+
+        MfaCode::query()->create([
+            'user_id' => $user->id,
+            'method' => 'email',
+            'destination' => $user->email,
+            'code' => $code,
+            'used' => false,
+            'expires_at' => now()->addMinutes(5),
+        ]);
+
+        $response = $this->postJson('/api/mfa/verify', [
+            'method' => 'email',
+            'destination' => $user->email,
+            'code' => $code,
+        ]);
 
         $response->assertOk()
             ->assertJson([
-                'message' => 'E-mail confirmado com sucesso. Sua conta está ativa.'
+                'message' => 'Método verificado com sucesso.',
             ]);
 
         $this->assertDatabaseHas('users', [
@@ -87,15 +111,36 @@ class RegisterVerificationTest extends TestCase
             'method' => 'email',
             'verified' => true,
         ]);
+        $this->assertDatabaseHas('mfa_codes', [
+            'user_id' => $user->id,
+            'code' => $code,
+            'used' => true,
+        ]);
     }
 
-    public function test_verification_with_invalid_token_returns_error(): void
+    public function test_verification_with_invalid_code_returns_error(): void
     {
-        $response = $this->getJson('/api/auth/verify-email?token=invalid-token');
+        /** @var User $user */
+        $user = User::factory()->unverified()->create([
+            'email' => 'invalid@example.com',
+        ]);
 
-        $response->assertStatus(400)
+        MfaMethod::query()->create([
+            'user_id' => $user->id,
+            'method' => 'email',
+            'destination' => $user->email,
+            'verified' => false,
+        ]);
+
+        $response = $this->postJson('/api/mfa/verify', [
+            'method' => 'email',
+            'destination' => $user->email,
+            'code' => '000000',
+        ]);
+
+        $response->assertStatus(422)
             ->assertJson([
-                'message' => 'Token inválido.'
+                'message' => 'Código inválido ou expirado.',
             ]);
     }
 
@@ -106,25 +151,86 @@ class RegisterVerificationTest extends TestCase
             'email' => 'expired@example.com',
         ]);
 
-        /** @var EmailVerificationService $service */
-        $service = app(EmailVerificationService::class);
-        $token = $service->createToken($user);
-
-        $payload = [
+        MfaMethod::query()->create([
             'user_id' => $user->id,
-            'email' => $user->email,
-            'expires_at' => now()->subMinute()->toIso8601String(),
-        ];
+            'method' => 'email',
+            'destination' => $user->email,
+            'verified' => false,
+        ]);
 
-        Cache::store(config('email_verification.store'))
-            ->put(config('email_verification.key_prefix') . $token, $payload, 60);
+        MfaCode::query()->create([
+            'user_id' => $user->id,
+            'method' => 'email',
+            'destination' => $user->email,
+            'code' => '999999',
+            'used' => false,
+            'expires_at' => now()->subMinute(),
+        ]);
 
-        $response = $this->getJson('/api/auth/verify-email?token=' . $token);
+        $response = $this->postJson('/api/mfa/verify', [
+            'method' => 'email',
+            'destination' => $user->email,
+            'code' => '999999',
+        ]);
 
         $response->assertStatus(422)
             ->assertJson([
-                'message' => 'Token expirado.'
+                'message' => 'Código inválido ou expirado.',
             ]);
+    }
+
+    public function test_email_can_be_verified_via_link(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->unverified()->create([
+            'email' => 'link@example.com',
+            'password' => Hash::make('12345678'),
+            'cpf' => '22233344455',
+        ]);
+
+        MfaMethod::query()->create([
+            'user_id' => $user->id,
+            'method' => 'email',
+            'destination' => $user->email,
+            'verified' => false,
+        ]);
+
+        $code = '654321';
+
+        MfaCode::query()->create([
+            'user_id' => $user->id,
+            'method' => 'email',
+            'destination' => $user->email,
+            'code' => $code,
+            'used' => false,
+            'expires_at' => now()->addMinutes(5),
+        ]);
+
+        $response = $this->get('/api/mfa/verify-link?' . http_build_query([
+            'method' => 'email',
+            'destination' => $user->email,
+            'code' => $code,
+        ]));
+
+        $response->assertOk()
+            ->assertSee('Método verificado com sucesso.');
+
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'status' => UserStatus::Active->value,
+        ]);
+
+        $this->assertDatabaseHas('mfa_methods', [
+            'user_id' => $user->id,
+            'method' => 'email',
+            'verified' => true,
+        ]);
+
+        $this->assertDatabaseHas('mfa_codes', [
+            'user_id' => $user->id,
+            'code' => $code,
+            'used' => true,
+        ]);
     }
 
     public function test_login_is_blocked_until_email_is_verified(): void
@@ -133,6 +239,13 @@ class RegisterVerificationTest extends TestCase
             'email' => 'pending@example.com',
             'password' => Hash::make('password123'),
             'cpf' => '11122233344',
+        ]);
+
+        MfaMethod::query()->create([
+            'user_id' => $user->id,
+            'method' => 'email',
+            'destination' => $user->email,
+            'verified' => false,
         ]);
 
         $response = $this->postJson('/api/auth/login', [
@@ -154,8 +267,8 @@ class RegisterVerificationTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJson([
-                'message' => 'O CPF informado não é válido.',
-            ]);
+            'message' => 'O CPF informado não é válido.',
+        ]);
     }
 
     private function validPayload(array $overrides = []): array

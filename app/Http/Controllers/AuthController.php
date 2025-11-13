@@ -3,13 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\DTOs\RegisterUserDTO;
-use App\Enums\UserStatus;
 use App\Exceptions\InvalidCpfException;
 use App\Exceptions\UserAlreadyExistsException;
 use App\Http\Requests\RegisterRequest;
-use App\Models\MfaMethod;
 use App\Models\User;
-use App\Services\EmailVerificationService;
 use App\Services\RegisterUserService;
 use App\Services\TokenCacheService;
 use Illuminate\Http\Request;
@@ -23,7 +20,6 @@ class AuthController extends Controller
 {
     public function __construct(
         private readonly RegisterUserService $registerUserService,
-        private readonly EmailVerificationService $emailVerificationService,
         private readonly TokenCacheService $tokenCacheService,
     ) {
     }
@@ -73,7 +69,12 @@ class AuthController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::user();
 
-        if ($user->status !== UserStatus::Active || !$user->email_verified_at) {
+        $emailVerified = $user->mfaMethods()
+            ->where('method', 'email')
+            ->where('verified', true)
+            ->exists();
+
+        if (!$emailVerified) {
             Auth::logout();
 
             return response()->json([
@@ -129,58 +130,6 @@ class AuthController extends Controller
                 'details' => $e->getMessage(),
             ], 500);
         }
-    }
-
-    public function verifyEmail(Request $request)
-    {
-        $request->validate([
-            'token' => ['required', 'string']
-        ]);
-
-        $token = $request->query('token');
-        $payload = $this->emailVerificationService->getPayload($token);
-
-        if (!$payload) {
-            return response()->json([
-                'message' => 'Token inválido.'
-            ], 400);
-        }
-
-        if ($this->emailVerificationService->tokenExpired($payload)) {
-            $this->emailVerificationService->delete($token);
-
-            return response()->json([
-                'message' => 'Token expirado.'
-            ], 422);
-        }
-
-        $user = User::find($payload['user_id'] ?? null);
-
-        if (!$user || $user->email !== ($payload['email'] ?? null)) {
-            $this->emailVerificationService->delete($token);
-
-            return response()->json([
-                'message' => 'Token inválido.'
-            ], 400);
-        }
-
-        DB::transaction(function () use ($user) {
-            $user->forceFill([
-                'email_verified_at' => now(),
-                'status' => UserStatus::Active,
-            ])->save();
-
-            MfaMethod::updateOrCreate(
-                ['user_id' => $user->id, 'method' => 'email'],
-                ['destination' => $user->email, 'verified' => true]
-            );
-        });
-
-        $this->emailVerificationService->delete($token);
-
-        return response()->json([
-            'message' => 'E-mail confirmado com sucesso. Sua conta está ativa.'
-        ]);
     }
 
     // Refresh Token

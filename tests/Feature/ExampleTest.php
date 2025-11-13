@@ -9,13 +9,16 @@ class ExampleTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_verify_email_endpoint_handles_invalid_token(): void
+    public function test_mfa_send_returns_not_found_for_unknown_email(): void
     {
-        $response = $this->getJson('/api/auth/verify-email?token=invalid');
+        $response = $this->postJson('/api/mfa/send', [
+            'method' => 'email',
+            'destination' => 'unknown@example.com',
+        ]);
 
-        $response->assertStatus(400)
+        $response->assertStatus(404)
             ->assertJson([
-                'message' => 'Token inválido.'
+                'message' => 'Usuário não encontrado para este e-mail.'
             ]);
     }
 }
