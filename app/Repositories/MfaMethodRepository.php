@@ -15,16 +15,24 @@ class MfaMethodRepository
     public function upsert(User $user, string $method, string $destination, bool $verified): MfaMethod
     {
         /** @var MfaMethod $record */
-        $record = $this->model->newQuery()->updateOrCreate(
-            [
-                'user_id' => $user->getKey(),
-                'method' => $method,
-            ],
-            [
-                'destination' => $destination,
-                'verified' => $verified,
-            ]
-        );
+        $record = $this->model->newQuery()->firstOrNew([
+            'user_id' => $user->getKey(),
+            'method' => $method,
+        ]);
+
+        $destinationChanged = $record->exists && $record->destination !== $destination;
+
+        $record->destination = $destination;
+
+        if (!$record->exists) {
+            $record->verified = $verified;
+        } elseif ($verified) {
+            $record->verified = true;
+        } elseif ($destinationChanged) {
+            $record->verified = false;
+        }
+
+        $record->save();
 
         return $record;
     }

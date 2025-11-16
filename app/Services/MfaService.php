@@ -35,7 +35,6 @@ class MfaService
 
         $this->transactionManager->run(function () use ($user, $dto, $code) {
             $this->mfaMethodRepository->upsert($user, $dto->method, $dto->destination, false);
-            $this->mfaCodeRepository->invalidateExisting($user, $dto->method, $dto->destination);
             $this->mfaCodeRepository->create($user, $dto->method, $dto->destination, $code, $this->expiresAt());
         });
 
