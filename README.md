@@ -221,12 +221,19 @@ curl -X POST http://localhost/api/mfa/verify \
 
 ```mermaid
 flowchart LR
-    A["Usuário envia credenciais"] --> B["POST /auth/login"]
-    B -->|Token emitido| C["/mfa/send dispara MFA"]
-    C --> D["Usuário recebe código (email • sms • whatsapp)"]
-    D --> E["/mfa/verify valida o código"]
-    E -->|Método verificado| F["Acesso liberado a rotas protegidas"]
-    F --> G["/auth/refresh renova o token"]
+    A["Usuário envia credenciais"] --> B{Credenciais válidas?}
+    B -- "Não" --> Bx["401 • \"Credenciais inválidas.\""]
+    B -- "Sim" --> C["Token emitido pelo Passport"]
+    C --> Ct{Token válido ao acessar APIs?}
+    Ct -- "Não" --> Cx["401 • \"Token inválido ou expirado.\""]
+    Ct -- "Sim" --> D{MFA obrigatório?}
+    D -- "Não" --> H["Acesso liberado"]
+    D -- "Sim" --> E["/mfa/send envia código (email • sms • whatsapp)"]
+    E --> F["Usuário recebe código"]
+    F --> G["/mfa/verify envia código digitado"]
+    G -- "Código válido" --> H
+    G -- "Inválido/expirado" --> Gy["422 • solicitar novo código"]
+    H --> I["/auth/refresh renova o token quando necessário"]
 ```
 
 1. Usuário efetua login e recebe token Passport.
