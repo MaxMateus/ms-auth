@@ -221,12 +221,12 @@ curl -X POST http://localhost/api/mfa/verify \
 
 ```mermaid
 flowchart LR
-    A[Usuário envia credenciais] --> B[Login /auth/login]
-    B -->|token emitido| C[Aplicativo inicia MFA com /mfa/send]
-    C --> D[Usuário recebe código (email/sms/whatsapp)]
-    D --> E[/mfa/verify|Confirma código]
-    E -->|método verificado| F[Usuário liberado para endpoints protegidos]
-    F --> G[/auth/refresh para prolongar sessão]
+    A["Usuário envia credenciais"] --> B["POST /auth/login"]
+    B -->|Token emitido| C["/mfa/send dispara MFA"]
+    C --> D["Usuário recebe código (email • sms • whatsapp)"]
+    D --> E["/mfa/verify valida o código"]
+    E -->|Método verificado| F["Acesso liberado a rotas protegidas"]
+    F --> G["/auth/refresh renova o token"]
 ```
 
 1. Usuário efetua login e recebe token Passport.
