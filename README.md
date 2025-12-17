@@ -286,4 +286,4 @@ flowchart LR
 - **Max Mateus** — Desenvolvedor Back-end.
 - Portfólio: [https://maxmateus.com.br](https://maxmateus.com.br)
 - GitHub: [https://github.com/maxmateus](https://github.com/maxmateus)
-- LinkedIn: [https://www.linkedin.com/in/maxmateus](https://www.linkedin.com/in/maxmateus)
+- LinkedIn: [https://www.linkedin.com/in/maxmateus](https://www.linkedin.com/in/max-mateus2021)
