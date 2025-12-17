@@ -13,6 +13,7 @@ use App\Services\MfaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use OpenApi\Annotations as OA;
 
 class MfaController extends Controller
 {
@@ -20,6 +21,25 @@ class MfaController extends Controller
     {
     }
 
+    /**
+     * @OA\Get(
+     *     path="/mfa/methods",
+     *     operationId="listMfaMethods",
+     *     tags={"MFA"},
+     *     summary="Lista os métodos de MFA cadastrados para o usuário autenticado.",
+     *     @OA\Response(
+     *         response=200,
+     *         description="Lista retornada com sucesso.",
+     *         @OA\JsonContent(ref="#/components/schemas/MfaMethodsResponse")
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Token inválido.",
+     *         @OA\JsonContent(ref="#/components/schemas/MessageResponse")
+     *     ),
+     *     security={{"passport":{}}}
+     * )
+     */
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -29,6 +49,28 @@ class MfaController extends Controller
         ]);
     }
 
+    /**
+     * @OA\Post(
+     *     path="/mfa/send",
+     *     operationId="sendMfaCode",
+     *     tags={"MFA"},
+     *     summary="Solicita o envio de um código para verificação de MFA.",
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(ref="#/components/schemas/MfaSendRequest")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Código enviado.",
+     *         @OA\JsonContent(ref="#/components/schemas/MessageResponse")
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Usuário não encontrado ou método indisponível.",
+     *         @OA\JsonContent(ref="#/components/schemas/MessageResponse")
+     *     )
+     * )
+     */
     public function send(SendMfaCodeRequest $request): JsonResponse
     {
         $this->mfaService->sendCode(
@@ -41,6 +83,28 @@ class MfaController extends Controller
         ]);
     }
 
+    /**
+     * @OA\Post(
+     *     path="/mfa/verify",
+     *     operationId="verifyMfaCode",
+     *     tags={"MFA"},
+     *     summary="Confirma um código recebido e habilita o método.",
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(ref="#/components/schemas/MfaVerifyRequest")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Código validado.",
+     *         @OA\JsonContent(ref="#/components/schemas/MfaVerifyResponse")
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Código inválido ou expirado.",
+     *         @OA\JsonContent(ref="#/components/schemas/MessageResponse")
+     *     )
+     * )
+     */
     public function verify(VerifyMfaCodeRequest $request): JsonResponse
     {
         $methodModel = $this->mfaService->verifyCode(
@@ -54,6 +118,43 @@ class MfaController extends Controller
         ]);
     }
 
+    /**
+     * @OA\Get(
+     *     path="/mfa/verify-link",
+     *     operationId="verifyMfaLink",
+     *     tags={"MFA"},
+     *     summary="Confirma um código enviado por link.",
+     *     @OA\Parameter(
+     *         name="method",
+     *         in="query",
+     *         required=true,
+     *         description="Método que originou o envio.",
+     *         @OA\Schema(type="string", enum={"email","sms","whatsapp"})
+     *     ),
+     *     @OA\Parameter(
+     *         name="destination",
+     *         in="query",
+     *         required=true,
+     *         description="Destino utilizado para enviar o código.",
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="code",
+     *         in="query",
+     *         required=true,
+     *         description="Código de 6 dígitos recebido.",
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Retorna uma página HTML com o status da validação.",
+     *         @OA\MediaType(
+     *             mediaType="text/html",
+     *             @OA\Schema(type="string")
+     *         )
+     *     )
+     * )
+     */
     public function verifyLink(VerifyMfaLinkRequest $request)
     {
         try {

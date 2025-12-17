@@ -1,0 +1,755 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "MS Auth API",
+        "description": "Serviços de autenticação, registro e MFA utilizados pelos clientes da plataforma.",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://localhost/api",
+            "description": "Gateway principal"
+        }
+    ],
+    "paths": {
+        "/auth/register": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Cria um novo usuário e dispara a validação de MFA por e-mail.",
+                "operationId": "registerUser",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegisterRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Usuário criado.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Dados inválidos.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/login": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Autentica um usuário e retorna o token de acesso Passport.",
+                "operationId": "login",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LoginRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Credenciais válidas.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LoginResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Credenciais inválidas.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "423": {
+                        "description": "Conta pendente de verificação.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Revoga o token atual do usuário autenticado.",
+                "operationId": "logout",
+                "responses": {
+                    "200": {
+                        "description": "Sessão finalizada.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Token inválido ou expirado.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "passport": []
+                    }
+                ]
+            }
+        },
+        "/auth/refresh": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Revoga o token atual e retorna um novo token.",
+                "description": "É necessário enviar o token atual no header Authorization.",
+                "operationId": "refreshToken",
+                "responses": {
+                    "200": {
+                        "description": "Token renovado.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RefreshTokenResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Token inválido ou revogado.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "passport": []
+                    }
+                ]
+            }
+        },
+        "/mfa/methods": {
+            "get": {
+                "tags": [
+                    "MFA"
+                ],
+                "summary": "Lista os métodos de MFA cadastrados para o usuário autenticado.",
+                "operationId": "listMfaMethods",
+                "responses": {
+                    "200": {
+                        "description": "Lista retornada com sucesso.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MfaMethodsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Token inválido.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "passport": []
+                    }
+                ]
+            }
+        },
+        "/mfa/send": {
+            "post": {
+                "tags": [
+                    "MFA"
+                ],
+                "summary": "Solicita o envio de um código para verificação de MFA.",
+                "operationId": "sendMfaCode",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/MfaSendRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Código enviado.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Usuário não encontrado ou método indisponível.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mfa/verify": {
+            "post": {
+                "tags": [
+                    "MFA"
+                ],
+                "summary": "Confirma um código recebido e habilita o método.",
+                "operationId": "verifyMfaCode",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/MfaVerifyRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Código validado.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MfaVerifyResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Código inválido ou expirado.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mfa/verify-link": {
+            "get": {
+                "tags": [
+                    "MFA"
+                ],
+                "summary": "Confirma um código enviado por link.",
+                "operationId": "verifyMfaLink",
+                "parameters": [
+                    {
+                        "name": "method",
+                        "in": "query",
+                        "description": "Método que originou o envio.",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "email",
+                                "sms",
+                                "whatsapp"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "destination",
+                        "in": "query",
+                        "description": "Destino utilizado para enviar o código.",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "code",
+                        "in": "query",
+                        "description": "Código de 6 dígitos recebido.",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retorna uma página HTML com o status da validação.",
+                        "content": {
+                            "text/html": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/me": {
+            "get": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Retorna os dados do usuário autenticado.",
+                "operationId": "currentUser",
+                "responses": {
+                    "200": {
+                        "description": "Usuário autenticado.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/User"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Token inválido.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageResponse"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "passport": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "RegisterRequest": {
+                "required": [
+                    "name",
+                    "email",
+                    "password",
+                    "password_confirmation",
+                    "cpf",
+                    "phone",
+                    "birthdate",
+                    "gender",
+                    "accept_terms",
+                    "street",
+                    "number",
+                    "neighborhood",
+                    "city",
+                    "state",
+                    "zip_code"
+                ],
+                "properties": {
+                    "name": {
+                        "description": "Coleção de esquemas reutilizados pela documentação OpenAPI.",
+                        "type": "string",
+                        "example": "Maria Silva"
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "example": "maria@example.com"
+                    },
+                    "password": {
+                        "type": "string",
+                        "format": "password",
+                        "example": "Str0ngPass!"
+                    },
+                    "password_confirmation": {
+                        "type": "string",
+                        "format": "password",
+                        "example": "Str0ngPass!"
+                    },
+                    "cpf": {
+                        "type": "string",
+                        "example": "123.456.789-10"
+                    },
+                    "phone": {
+                        "type": "string",
+                        "example": "+55 11 99999-9999"
+                    },
+                    "birthdate": {
+                        "type": "string",
+                        "format": "date",
+                        "example": "1985-06-20"
+                    },
+                    "gender": {
+                        "type": "string",
+                        "enum": [
+                            "M",
+                            "F",
+                            "Outro"
+                        ],
+                        "example": "F"
+                    },
+                    "accept_terms": {
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "street": {
+                        "type": "string",
+                        "example": "Av. Paulista"
+                    },
+                    "number": {
+                        "type": "string",
+                        "example": "1000"
+                    },
+                    "complement": {
+                        "type": "string",
+                        "example": "Apto 12",
+                        "nullable": true
+                    },
+                    "neighborhood": {
+                        "type": "string",
+                        "example": "Bela Vista"
+                    },
+                    "city": {
+                        "type": "string",
+                        "example": "São Paulo"
+                    },
+                    "state": {
+                        "type": "string",
+                        "example": "SP"
+                    },
+                    "zip_code": {
+                        "type": "string",
+                        "example": "01310-100"
+                    }
+                },
+                "type": "object"
+            },
+            "LoginRequest": {
+                "required": [
+                    "email",
+                    "password"
+                ],
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "example": "maria@example.com"
+                    },
+                    "password": {
+                        "type": "string",
+                        "format": "password",
+                        "example": "Str0ngPass!"
+                    }
+                },
+                "type": "object"
+            },
+            "LoginResponse": {
+                "required": [
+                    "token",
+                    "user"
+                ],
+                "properties": {
+                    "token": {
+                        "type": "string",
+                        "example": "ey..."
+                    },
+                    "user": {
+                        "$ref": "#/components/schemas/User"
+                    }
+                },
+                "type": "object"
+            },
+            "RefreshTokenResponse": {
+                "required": [
+                    "token",
+                    "message"
+                ],
+                "properties": {
+                    "token": {
+                        "type": "string",
+                        "example": "ey..."
+                    },
+                    "message": {
+                        "type": "string",
+                        "example": "Token renovado com sucesso"
+                    }
+                },
+                "type": "object"
+            },
+            "MessageResponse": {
+                "required": [
+                    "message"
+                ],
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "example": "Operação executada com sucesso."
+                    }
+                },
+                "type": "object"
+            },
+            "User": {
+                "required": [
+                    "id",
+                    "name",
+                    "email",
+                    "cpf",
+                    "phone",
+                    "birthdate",
+                    "gender",
+                    "accept_terms",
+                    "status"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 10
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "Maria Silva"
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "example": "maria@example.com"
+                    },
+                    "cpf": {
+                        "type": "string",
+                        "example": "123.456.789-10"
+                    },
+                    "phone": {
+                        "type": "string",
+                        "example": "+55 11 99999-9999"
+                    },
+                    "birthdate": {
+                        "type": "string",
+                        "format": "date",
+                        "example": "1985-06-20"
+                    },
+                    "gender": {
+                        "type": "string",
+                        "enum": [
+                            "M",
+                            "F",
+                            "Outro"
+                        ]
+                    },
+                    "accept_terms": {
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "street": {
+                        "type": "string"
+                    },
+                    "number": {
+                        "type": "string"
+                    },
+                    "complement": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "neighborhood": {
+                        "type": "string"
+                    },
+                    "city": {
+                        "type": "string"
+                    },
+                    "state": {
+                        "type": "string",
+                        "example": "SP"
+                    },
+                    "zip_code": {
+                        "type": "string",
+                        "example": "01310-100"
+                    },
+                    "status": {
+                        "type": "string",
+                        "example": "active"
+                    },
+                    "email_verified_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "MfaMethod": {
+                "required": [
+                    "id",
+                    "method",
+                    "destination",
+                    "verified"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": [
+                            "email",
+                            "sms",
+                            "whatsapp"
+                        ]
+                    },
+                    "destination": {
+                        "type": "string",
+                        "example": "maria@example.com"
+                    },
+                    "verified": {
+                        "type": "boolean",
+                        "example": true
+                    }
+                },
+                "type": "object"
+            },
+            "MfaMethodsResponse": {
+                "required": [
+                    "methods"
+                ],
+                "properties": {
+                    "methods": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MfaMethod"
+                        }
+                    }
+                },
+                "type": "object"
+            },
+            "MfaSendRequest": {
+                "required": [
+                    "method",
+                    "destination"
+                ],
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "enum": [
+                            "email",
+                            "sms",
+                            "whatsapp"
+                        ]
+                    },
+                    "destination": {
+                        "type": "string",
+                        "example": "maria@example.com"
+                    }
+                },
+                "type": "object"
+            },
+            "MfaVerifyRequest": {
+                "required": [
+                    "method",
+                    "destination",
+                    "code"
+                ],
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/MfaSendRequest"
+                    },
+                    {
+                        "properties": {
+                            "code": {
+                                "type": "string",
+                                "example": "123456"
+                            }
+                        },
+                        "type": "object"
+                    }
+                ]
+            },
+            "MfaVerifyResponse": {
+                "required": [
+                    "message",
+                    "method"
+                ],
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "example": "Método verificado com sucesso."
+                    },
+                    "method": {
+                        "$ref": "#/components/schemas/MfaMethod"
+                    }
+                },
+                "type": "object"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Auth",
+            "description": "Fluxos de autenticação e gerenciamento de sessão."
+        },
+        {
+            "name": "MFA",
+            "description": "Operações relacionadas à verificação em duplo fator."
+        }
+    ]
+}
